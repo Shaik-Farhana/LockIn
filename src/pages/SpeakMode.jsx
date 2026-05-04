@@ -1,16 +1,41 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useApp } from '../context/AppContext'
 import CDPlayer from '../components/CDPlayer'
 
 const SPEAK_DURATION = 5 * 60
 const TIPS = [
-  'Start with your main argument in 1 sentence',
+  'Start with your main argument in one sentence',
   'Use a real-world example to support it',
   'Address the strongest counterargument',
-  'End with a clear, confident conclusion',
-  'Pause after key points — silence is power',
+  'Pause after key points; silence creates confidence',
+  'End with a clear conclusion',
 ]
+
+function playFinishSound() {
+  const AudioContext = window.AudioContext || window.webkitAudioContext
+  if (!AudioContext) return
+
+  const ctx = new AudioContext()
+  const notes = [520, 740, 980]
+
+  notes.forEach((frequency, index) => {
+    const oscillator = ctx.createOscillator()
+    const gain = ctx.createGain()
+    const start = ctx.currentTime + index * 0.14
+
+    oscillator.type = 'triangle'
+    oscillator.frequency.setValueAtTime(frequency, start)
+    gain.gain.setValueAtTime(0.0001, start)
+    gain.gain.exponentialRampToValueAtTime(0.16, start + 0.02)
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.13)
+
+    oscillator.connect(gain)
+    gain.connect(ctx.destination)
+    oscillator.start(start)
+    oscillator.stop(start + 0.15)
+  })
+}
 
 export default function SpeakMode() {
   const navigate = useNavigate()
@@ -23,9 +48,27 @@ export default function SpeakMode() {
   const intervalRef = useRef(null)
   const waveRef = useRef(null)
   const mediaRef = useRef(null)
+  const streamRef = useRef(null)
   const chunksRef = useRef([])
+  const soundPlayedRef = useRef(false)
 
-  useEffect(() => { if (!currentTopic) navigate('/topics') }, [currentTopic])
+  useEffect(() => {
+    if (!currentTopic) navigate('/topics')
+  }, [currentTopic, navigate])
+
+  const stopRecording = useCallback(() => {
+    setRecording(false)
+    clearInterval(intervalRef.current)
+    clearInterval(waveRef.current)
+    setBars(Array(20).fill(4))
+
+    try {
+      if (mediaRef.current?.state !== 'inactive') mediaRef.current?.stop()
+      streamRef.current?.getTracks().forEach(track => track.stop())
+    } catch {
+      // The recorder may already be stopped by the browser.
+    }
+  }, [])
 
   useEffect(() => {
     if (recording && timeLeft > 0) {
@@ -33,47 +76,64 @@ export default function SpeakMode() {
       waveRef.current = setInterval(() => {
         setBars(Array(20).fill(0).map(() => Math.floor(Math.random() * 32) + 4))
       }, 100)
-    } else if (timeLeft === 0) stopRecording()
-    return () => { clearInterval(intervalRef.current); clearInterval(waveRef.current) }
-  }, [recording, timeLeft])
+    }
+
+    if (timeLeft === 0 && !soundPlayedRef.current) {
+      soundPlayedRef.current = true
+      stopRecording()
+      playFinishSound()
+    }
+
+    return () => {
+      clearInterval(intervalRef.current)
+      clearInterval(waveRef.current)
+    }
+  }, [recording, timeLeft, stopRecording])
 
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const mr = new MediaRecorder(stream)
+      const recorder = new MediaRecorder(stream)
       chunksRef.current = []
-      mr.ondataavailable = e => chunksRef.current.push(e.data)
-      mr.onstop = () => {
+      streamRef.current = stream
+
+      recorder.ondataavailable = event => chunksRef.current.push(event.data)
+      recorder.onstop = () => {
         const blob = new Blob(chunksRef.current, { type: 'audio/webm' })
         setAudioURL(URL.createObjectURL(blob))
       }
-      mr.start()
-      mediaRef.current = mr
-    } catch {}
-    setRecording(true)
-    setStarted(true)
+
+      recorder.start()
+      mediaRef.current = recorder
+      setRecording(true)
+      setStarted(true)
+    } catch {
+      setRecording(false)
+      setStarted(false)
+    }
   }
 
-  const stopRecording = () => {
-    setRecording(false)
-    clearInterval(intervalRef.current)
-    clearInterval(waveRef.current)
-    setBars(Array(20).fill(4))
-    try { mediaRef.current?.stop() } catch {}
+  const handleFinish = () => {
+    stopRecording()
+    incrementSession()
+    navigate('/session-complete')
   }
 
-  const handleFinish = () => { stopRecording(); incrementSession(); navigate('/session-complete') }
   const mins = String(Math.floor(timeLeft / 60)).padStart(2, '0')
   const secs = String(timeLeft % 60).padStart(2, '0')
-  const circumference = 2 * Math.PI * 56
+  const progress = 1 - timeLeft / SPEAK_DURATION
+  const circumference = 2 * Math.PI * 86
   const isFinished = timeLeft === 0
+
   if (!currentTopic) return null
 
   return (
-    <div className="relative z-10 min-h-screen pt-28 pb-12 px-4 flex flex-col items-center">
-      <div className="w-full max-w-xl">
+    <div className="relative z-10 min-h-screen pt-24 pb-10 px-4 md:px-8">
+      <div className="max-w-6xl mx-auto">
         <div className="flex items-center justify-between mb-6">
-          <button onClick={() => navigate('/study')} className="font-sans text-sm text-night-light hover:text-paper transition-colors">← back</button>
+          <button onClick={() => navigate('/study')} className="font-sans text-sm text-night-light hover:text-paper transition-colors">
+            Back
+          </button>
           <div className="flex items-center gap-2 font-mono text-xs tracking-widest uppercase">
             {recording && <span className="w-2 h-2 rounded-full bg-red-400 animate-pulse block" />}
             <span className={recording ? 'text-red-300' : 'text-night-light'}>{recording ? 'Recording' : 'Speak Mode'}</span>
@@ -81,95 +141,106 @@ export default function SpeakMode() {
           <div className="w-12" />
         </div>
 
-        {/* Topic pill */}
-        <div className="flex justify-center mb-6">
-          <div className="glass-light px-5 py-2 rounded-full font-editorial italic text-sm text-gold-soft max-w-xs text-center">
-            {currentTopic.title}
-          </div>
-        </div>
+        <div className="grid gap-6 lg:grid-cols-[0.85fr_1.15fr] items-start">
+          <aside className="glass rounded-3xl p-6 md:p-8 lg:sticky lg:top-28">
+            <div className="flex flex-col items-center text-center">
+              <div className="relative mb-6">
+                <svg width="250" height="250" viewBox="0 0 210 210" className="max-w-full">
+                  <circle cx="105" cy="105" r="86" fill="none" stroke="rgba(108,158,179,0.2)" strokeWidth="8" />
+                  <circle
+                    cx="105"
+                    cy="105"
+                    r="86"
+                    fill="none"
+                    stroke={recording ? '#FFC52D' : 'rgba(108,158,179,0.35)'}
+                    strokeWidth="8"
+                    strokeLinecap="round"
+                    strokeDasharray={circumference}
+                    strokeDashoffset={circumference * (1 - progress)}
+                    transform="rotate(-90 105 105)"
+                    style={{ transition: 'stroke-dashoffset 1s linear, stroke 0.3s', filter: recording ? 'drop-shadow(0 0 10px rgba(255,197,45,0.55))' : 'none' }}
+                  />
+                </svg>
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <div className="font-display text-7xl text-paper tracking-widest leading-none">{mins}:{secs}</div>
+                  <div className="font-mono text-xs text-night-light mt-3 uppercase tracking-widest">speak time</div>
+                </div>
+              </div>
 
-        {/* Timer */}
-        <div className="flex justify-center mb-6">
-          <div className="relative">
-            <svg width="150" height="150" viewBox="0 0 130 130">
-              <circle cx="65" cy="65" r="56" fill="none" stroke="rgba(108,158,179,0.2)" strokeWidth="5" />
-              <circle cx="65" cy="65" r="56" fill="none"
-                stroke={recording ? '#FFC52D' : 'rgba(108,158,179,0.3)'}
-                strokeWidth="5" strokeLinecap="round"
-                strokeDasharray={circumference}
-                strokeDashoffset={circumference * (1 - (1 - timeLeft / SPEAK_DURATION))}
-                transform="rotate(-90 65 65)"
-                style={{ transition: 'stroke-dashoffset 1s linear, stroke 0.3s', filter: recording ? 'drop-shadow(0 0 8px rgba(255,197,45,0.5))' : 'none' }}
-              />
-            </svg>
-            <div className="absolute inset-0 flex flex-col items-center justify-center">
-              <div className="font-display text-4xl text-paper tracking-widest">{mins}:{secs}</div>
-              <div className="font-mono text-xs text-night-light mt-1">speak time</div>
+              <div className="w-full glass-light rounded-2xl p-4 mb-5">
+                <div className="flex items-end justify-center gap-1 h-16 mb-3">
+                  {bars.map((h, i) => (
+                    <div
+                      key={i}
+                      className="rounded-full transition-all"
+                      style={{
+                        width: '5px',
+                        height: `${h}px`,
+                        background: recording
+                          ? `rgba(252, 233, 151, ${0.4 + (h / 36) * 0.6})`
+                          : 'rgba(108, 158, 179, 0.25)',
+                        transitionDuration: recording ? '100ms' : '300ms',
+                        boxShadow: recording ? `0 0 4px rgba(252,233,151,${h / 60})` : 'none',
+                      }}
+                    />
+                  ))}
+                </div>
+                <div
+                  className="font-mono text-xs text-center tracking-widest"
+                  style={{ color: recording ? 'rgba(252,233,151,0.8)' : 'rgba(108,158,179,0.55)' }}
+                >
+                  {recording ? 'RECORDING IN PROGRESS' : started ? 'PAUSED' : 'READY TO RECORD'}
+                </div>
+              </div>
+
+              {!started ? (
+                <button onClick={startRecording} className="btn-glass w-full justify-center text-base py-4">
+                  <span className="w-2.5 h-2.5 rounded-full bg-gold block" />
+                  Start Recording
+                </button>
+              ) : isFinished || !recording ? (
+                <div className="w-full space-y-3 animate-fade-up">
+                  {isFinished && <div className="text-center font-editorial italic text-gold-soft text-lg">Speak time complete</div>}
+                  <button onClick={handleFinish} className="btn-glass w-full justify-center text-base py-4">
+                    Finish Session
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={stopRecording}
+                  className="w-full py-3.5 rounded-full font-sans font-semibold text-base transition-all"
+                  style={{ background: 'rgba(248,113,113,0.15)', border: '1px solid rgba(248,113,113,0.4)', color: '#fca5a5' }}
+                >
+                  Stop Recording
+                </button>
+              )}
             </div>
-          </div>
+          </aside>
+
+          <section className="space-y-5">
+            <div className="glass-light px-5 py-3 rounded-2xl font-editorial italic text-xl text-gold-soft">
+              "{currentTopic.title}"
+            </div>
+
+            <div className="paper-card rounded-xl p-6 md:p-8">
+              <div className="font-mono text-xs text-ink/50 mb-4 uppercase tracking-widest">Speaking Tips -</div>
+              <ul className="space-y-3">
+                {TIPS.map((tip, i) => (
+                  <li key={i} className="flex items-start gap-3 text-base text-ink/80 leading-relaxed">
+                    <span className="text-gold-warm mt-0.5 shrink-0">{String(i + 1).padStart(2, '0')}</span>
+                    <span>{tip}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {audioURL && (
+              <div>
+                <CDPlayer audioURL={audioURL} sessionName={currentTopic.title} />
+              </div>
+            )}
+          </section>
         </div>
-
-        {/* Waveform */}
-        <div className="glass rounded-2xl p-5 mb-5">
-          <div className="flex items-end justify-center gap-1 h-14 mb-3">
-            {bars.map((h, i) => (
-              <div key={i} className="rounded-full transition-all"
-                style={{
-                  width: '5px', height: `${h}px`,
-                  background: recording
-                    ? `rgba(252, 233, 151, ${0.4 + (h / 36) * 0.6})`
-                    : 'rgba(108, 158, 179, 0.2)',
-                  transitionDuration: recording ? '100ms' : '300ms',
-                  boxShadow: recording ? `0 0 4px rgba(252,233,151,${h/60})` : 'none',
-                }}
-              />
-            ))}
-          </div>
-          <div className="font-mono text-xs text-center tracking-widest"
-            style={{ color: recording ? 'rgba(252,233,151,0.8)' : 'rgba(108,158,179,0.4)' }}>
-            {recording ? '● RECORDING IN PROGRESS' : started ? '◻ PAUSED' : '○ READY TO RECORD'}
-          </div>
-        </div>
-
-        {/* Speaking tips */}
-        <div className="paper-card rounded-xl p-5 mb-5">
-          <div className="font-mono text-xs text-ink/50 mb-3 uppercase tracking-widest">Speaking Tips —</div>
-          <ul className="space-y-2">
-            {TIPS.map((tip, i) => (
-              <li key={i} className="flex items-start gap-2 text-sm text-ink/80">
-                <span className="text-gold-warm mt-0.5 shrink-0">✦</span>{tip}
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        {/* CD Player for playback */}
-        {audioURL && (
-          <div className="mb-5">
-            <CDPlayer audioURL={audioURL} sessionName={currentTopic.title} />
-          </div>
-        )}
-
-        {/* Actions */}
-        {!started ? (
-          <button onClick={startRecording} className="btn-glass w-full justify-center text-base py-4">
-            <span className="w-2.5 h-2.5 rounded-full bg-gold block" />
-            Start Recording
-          </button>
-        ) : isFinished || !recording ? (
-          <div className="space-y-3 animate-fade-up">
-            {isFinished && <div className="text-center font-editorial italic text-gold-soft text-lg">Speak time complete ✦</div>}
-            <button onClick={handleFinish} className="btn-glass w-full justify-center text-base py-4">
-              Finish Session →
-            </button>
-          </div>
-        ) : (
-          <button onClick={stopRecording}
-            className="w-full py-3.5 rounded-full font-sans font-semibold text-base transition-all"
-            style={{ background: 'rgba(248,113,113,0.15)', border: '1px solid rgba(248,113,113,0.4)', color: '#fca5a5' }}>
-            ◼ &nbsp;Stop Recording
-          </button>
-        )}
       </div>
     </div>
   )
