@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTopics } from '../hooks/useTopics'
-import { useApp } from '../context/AppContext'
+import { useApp } from '../context/useApp'
 import { interviewTopics, vocabTopics, dailyTopicCategories } from '../data/topics'
 import { randomCategories, randomStructures, randomTopicsData } from '../data/randomTopics'
 

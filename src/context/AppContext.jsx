@@ -1,6 +1,15 @@
-import { createContext, useContext, useState, useEffect } from 'react'
+import { createContext, useState, useCallback } from 'react'
 
 const AppContext = createContext(null)
+
+function getOrCreateUserId() {
+  const key = 'ds_user_id'
+  const existing = localStorage.getItem(key)
+  if (existing) return existing
+  const created = crypto.randomUUID()
+  localStorage.setItem(key, created)
+  return created
+}
 
 export function AppProvider({ children }) {
   const [streak, setStreak] = useState(() => parseInt(localStorage.getItem('ds_streak') || '0'))
@@ -9,12 +18,38 @@ export function AppProvider({ children }) {
   const [currentTopic, setCurrentTopic] = useState(null)
   const [currentTab, setCurrentTab] = useState('daily')
   const [mode, setMode] = useState(() => localStorage.getItem('ds_mode') || 'night')
+  const [userId] = useState(() => getOrCreateUserId())
+  const [latestReview, setLatestReview] = useState(null)
+  const [recentSessions, setRecentSessions] = useState([])
+  const [cloudConnected, setCloudConnected] = useState(false)
 
   const toggleMode = () => {
     const next = mode === 'night' ? 'golden' : 'night'
     setMode(next)
     localStorage.setItem('ds_mode', next)
   }
+
+  const refreshCloudProgress = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/sessions?userId=${encodeURIComponent(userId)}`)
+      if (!response.ok) return
+      const payload = await response.json()
+      const stats = payload?.stats
+      if (!stats) return
+
+      setCloudConnected(true)
+      setRecentSessions(payload.recent || [])
+      setSessions(stats.totalSessions || 0)
+      setStreak(stats.streak || 0)
+      setAvgScore(stats.avgScore || 0)
+
+      localStorage.setItem('ds_sessions', stats.totalSessions || 0)
+      localStorage.setItem('ds_streak', stats.streak || 0)
+      localStorage.setItem('ds_avg_score', stats.avgScore || 0)
+    } catch {
+      // Keep local-only mode if backend is not configured yet.
+    }
+  }, [userId])
 
   const incrementSession = (score = null) => {
     const newSessions = sessions + 1
@@ -32,16 +67,30 @@ export function AppProvider({ children }) {
   }
 
   return (
-    <AppContext.Provider value={{
-      streak, sessions, avgScore,
-      currentTopic, setCurrentTopic,
-      currentTab, setCurrentTab,
-      mode, toggleMode,
-      incrementSession,
-    }}>
+    <AppContext.Provider
+      value={{
+        streak,
+        sessions,
+        avgScore,
+        currentTopic,
+        setCurrentTopic,
+        currentTab,
+        setCurrentTab,
+        mode,
+        toggleMode,
+        userId,
+        cloudConnected,
+        latestReview,
+        setLatestReview,
+        recentSessions,
+        setRecentSessions,
+        refreshCloudProgress,
+        incrementSession,
+      }}
+    >
       {children}
     </AppContext.Provider>
   )
 }
 
-export const useApp = () => useContext(AppContext)
+export { AppContext }

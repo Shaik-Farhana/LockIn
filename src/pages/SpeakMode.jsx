@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useApp } from '../context/AppContext'
+import { useApp } from '../context/useApp'
 import CDPlayer from '../components/CDPlayer'
+import { hasSupabaseClient, supabase } from '../lib/supabaseClient'
 
 const SPEAK_DURATION = 5 * 60
 const TIPS = [
@@ -39,12 +40,15 @@ function playFinishSound() {
 
 export default function SpeakMode() {
   const navigate = useNavigate()
-  const { currentTopic, incrementSession } = useApp()
+  const { currentTopic, incrementSession, userId, setLatestReview, refreshCloudProgress } = useApp()
   const [timeLeft, setTimeLeft] = useState(SPEAK_DURATION)
   const [recording, setRecording] = useState(false)
   const [started, setStarted] = useState(false)
   const [bars, setBars] = useState(Array(20).fill(4))
   const [audioURL, setAudioURL] = useState(null)
+  const [audioBlob, setAudioBlob] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
   const intervalRef = useRef(null)
   const waveRef = useRef(null)
   const mediaRef = useRef(null)
@@ -66,13 +70,13 @@ export default function SpeakMode() {
       if (mediaRef.current?.state !== 'inactive') mediaRef.current?.stop()
       streamRef.current?.getTracks().forEach(track => track.stop())
     } catch {
-      // The recorder may already be stopped by the browser.
+      // Recorder may already be stopped.
     }
   }, [])
 
   useEffect(() => {
     if (recording && timeLeft > 0) {
-      intervalRef.current = setInterval(() => setTimeLeft(t => t - 1), 1000)
+      intervalRef.current = setInterval(() => setTimeLeft((t) => t - 1), 1000)
       waveRef.current = setInterval(() => {
         setBars(Array(20).fill(0).map(() => Math.floor(Math.random() * 32) + 4))
       }, 100)
@@ -97,14 +101,17 @@ export default function SpeakMode() {
       chunksRef.current = []
       streamRef.current = stream
 
-      recorder.ondataavailable = event => chunksRef.current.push(event.data)
+      recorder.ondataavailable = (event) => chunksRef.current.push(event.data)
       recorder.onstop = () => {
         const blob = new Blob(chunksRef.current, { type: 'audio/webm' })
+        setAudioBlob(blob)
         setAudioURL(URL.createObjectURL(blob))
       }
 
       recorder.start()
       mediaRef.current = recorder
+      soundPlayedRef.current = false
+      setSaveError('')
       setRecording(true)
       setStarted(true)
     } catch {
@@ -113,10 +120,92 @@ export default function SpeakMode() {
     }
   }
 
-  const handleFinish = () => {
+  const uploadAndAnalyze = async (blob) => {
+    if (!hasSupabaseClient()) {
+      throw new Error('Supabase client is not configured.')
+    }
+
+    const uploadRes = await fetch('/api/upload-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId,
+        mimeType: blob.type || 'audio/webm',
+      }),
+    })
+
+    if (!uploadRes.ok) {
+      const payload = await uploadRes.json().catch(() => ({}))
+      throw new Error(payload.error || 'Failed to create upload URL.')
+    }
+
+    const uploadPayload = await uploadRes.json()
+    const { error: uploadError } = await supabase.storage
+      .from(uploadPayload.bucket)
+      .uploadToSignedUrl(
+        uploadPayload.path,
+        uploadPayload.token,
+        blob,
+        { contentType: blob.type || 'audio/webm' }
+      )
+
+    if (uploadError) {
+      throw new Error(uploadError.message)
+    }
+
+    const analyzeRes = await fetch('/api/analyze-session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId,
+        topic: currentTopic,
+        audioPath: uploadPayload.path,
+        mimeType: blob.type || 'audio/webm',
+        durationSeconds: SPEAK_DURATION - timeLeft,
+      }),
+    })
+
+    if (!analyzeRes.ok) {
+      const payload = await analyzeRes.json().catch(() => ({}))
+      throw new Error(payload.error || 'Failed to analyze recording.')
+    }
+
+    return analyzeRes.json()
+  }
+
+  const handleFinish = async () => {
+    if (saving) return
     stopRecording()
-    incrementSession()
-    navigate('/session-complete')
+    setSaving(true)
+    setSaveError('')
+
+    try {
+      let score = null
+      if (audioBlob) {
+        const result = await uploadAndAnalyze(audioBlob)
+        if (result?.analysis) {
+          setLatestReview({
+            ...result.analysis,
+            transcript: result.transcript || '',
+            audioUrl: result.audioUrl || null,
+            topicTitle: currentTopic?.title || '',
+          })
+          score = Number(result.analysis?.scores?.overall || 0)
+        }
+      } else {
+        setLatestReview(null)
+      }
+
+      incrementSession(score || null)
+      await refreshCloudProgress()
+      navigate('/session-complete')
+    } catch (error) {
+      setSaveError(error.message || 'Could not save this recording to cloud.')
+      incrementSession()
+      navigate('/session-complete')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const mins = String(Math.floor(timeLeft / 60)).padStart(2, '0')
@@ -201,9 +290,10 @@ export default function SpeakMode() {
               ) : isFinished || !recording ? (
                 <div className="w-full space-y-3 animate-fade-up">
                   {isFinished && <div className="text-center font-editorial italic text-gold-soft text-lg">Speak time complete</div>}
-                  <button onClick={handleFinish} className="btn-glass w-full justify-center text-base py-4">
-                    Finish Session
+                  <button onClick={handleFinish} disabled={saving} className="btn-glass w-full justify-center text-base py-4 disabled:opacity-50">
+                    {saving ? 'Saving Session...' : 'Finish Session'}
                   </button>
+                  {saveError && <div className="font-mono text-xs text-red-300">{saveError}</div>}
                 </div>
               ) : (
                 <button
