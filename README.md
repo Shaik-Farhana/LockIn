@@ -1,16 +1,33 @@
-# React + Vite
+# LockIn
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+LockIn is a speaking-practice web app for building clearer communication through short daily sessions. Pick a topic, study a focused brief for five minutes, speak your answer, and track your progress over time.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- Daily topics with Easy, Medium, and Hard modes
+- Interview, vocabulary, and random speaking prompts
+- Five-minute study timer before speaking
+- Speaking mode with recording-style interaction
+- Progress tracking for streaks, sessions, and average score
+- Responsive Vite + React interface
 
-## React Compiler
+## Live Demo
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+https://lock-in-ten-zeta.vercel.app/
 
-## Expanding the ESLint configuration
+## Run Locally
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```bash
+npm install
+npm run dev
+```
+
+## Build
+
+```bash
+npm run build
+```
+
+## Tech Stack
+
+React, Vite, Tailwind CSS, and Vercel.
