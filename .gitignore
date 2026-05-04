@@ -23,3 +23,9 @@ lint.txt
 *.njsproj
 *.sln
 *.sw?
+
+# local env files
+.env
+.env.*
+.env.local
+.env.*.local
