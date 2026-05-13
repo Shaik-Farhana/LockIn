@@ -1,96 +1,182 @@
-import { createContext, useState, useCallback } from 'react'
+import { createContext, useContext, useState, useEffect } from 'react'
+import { supabase } from '../lib/supabase'
 
 const AppContext = createContext(null)
 
-function getOrCreateUserId() {
-  const key = 'ds_user_id'
-  const existing = localStorage.getItem(key)
-  if (existing) return existing
-  const created = crypto.randomUUID()
-  localStorage.setItem(key, created)
-  return created
-}
-
 export function AppProvider({ children }) {
-  const [streak, setStreak] = useState(() => parseInt(localStorage.getItem('ds_streak') || '0'))
-  const [sessions, setSessions] = useState(() => parseInt(localStorage.getItem('ds_sessions') || '0'))
-  const [avgScore, setAvgScore] = useState(() => parseFloat(localStorage.getItem('ds_avg_score') || '0'))
+  const [user, setUser] = useState(null)
+  const [authLoading, setAuthLoading] = useState(true)
+  const [streak, setStreak] = useState(0)
+  const [sessions, setSessions] = useState(0)
+  const [avgScore, setAvgScore] = useState(0)
+  const [sessionHistory, setSessionHistory] = useState([])
   const [currentTopic, setCurrentTopic] = useState(null)
   const [currentTab, setCurrentTab] = useState('daily')
-  const [mode, setMode] = useState(() => localStorage.getItem('ds_mode') || 'night')
-  const [userId] = useState(() => getOrCreateUserId())
-  const [latestReview, setLatestReview] = useState(null)
-  const [recentSessions, setRecentSessions] = useState([])
-  const [cloudConnected, setCloudConnected] = useState(false)
+  const [mode, setMode] = useState(() => localStorage.getItem('lockin_mode') || 'night')
+
+  // Auth listener
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null)
+      setAuthLoading(false)
+    })
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
+      setUser(session?.user ?? null)
+    })
+    return () => subscription.unsubscribe()
+  }, [])
+
+  // Load data when user changes
+  useEffect(() => {
+    if (user) loadUserData(user.id)
+    else {
+      setStreak(0); setSessions(0); setAvgScore(0); setSessionHistory([])
+    }
+  }, [user])
+
+  const loadUserData = async (userId) => {
+    // Load stats
+    const { data: stats, error } = await supabase
+      .from('user_stats')
+      .select('*')
+      .eq('user_id', userId)
+      .single()
+
+    if (stats) {
+      setStreak(stats.streak || 0)
+      setSessions(stats.sessions || 0)
+      setAvgScore(stats.avg_score || 0)
+    } else if (error?.code === 'PGRST116') {
+      // First time user — create row
+      await supabase.from('user_stats').insert({
+        user_id: userId, streak: 0, sessions: 0, avg_score: 0
+      })
+    }
+
+    // Load session history
+    const { data: history } = await supabase
+      .from('sessions')
+      .select('id, topic, created_at, ai_score, ai_clarity, ai_confidence, ai_filler_count, ai_feedback, ai_strengths, ai_improvements, audio_url, note')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(20)
+
+    if (history) setSessionHistory(history)
+  }
 
   const toggleMode = () => {
     const next = mode === 'night' ? 'golden' : 'night'
     setMode(next)
-    localStorage.setItem('ds_mode', next)
+    localStorage.setItem('lockin_mode', next)
   }
 
-  const refreshCloudProgress = useCallback(async () => {
-    try {
-      const response = await fetch(`/api/sessions?userId=${encodeURIComponent(userId)}`)
-      if (!response.ok) return
-      const payload = await response.json()
-      const stats = payload?.stats
-      if (!stats) return
+  const signInWithGoogle = async () => {
+    await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: window.location.origin },
+    })
+  }
 
-      setCloudConnected(true)
-      setRecentSessions(payload.recent || [])
-      setSessions(stats.totalSessions || 0)
-      setStreak(stats.streak || 0)
-      setAvgScore(stats.avgScore || 0)
+  const signInWithEmail = async (email, password) => {
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    if (error) throw error
+  }
 
-      localStorage.setItem('ds_sessions', stats.totalSessions || 0)
-      localStorage.setItem('ds_streak', stats.streak || 0)
-      localStorage.setItem('ds_avg_score', stats.avgScore || 0)
-    } catch {
-      // Keep local-only mode if backend is not configured yet.
+  const signUpWithEmail = async (email, password) => {
+    const { error } = await supabase.auth.signUp({ email, password })
+    if (error) throw error
+  }
+
+  const signOut = async () => {
+    await supabase.auth.signOut()
+  }
+
+  // Called from SessionComplete with full session data
+  const saveSession = async ({ audioBlob, note, topicTitle, aiResult, transcript }) => {
+    if (!user) return null
+
+    let audioUrl = null
+
+    // Upload audio to Supabase Storage
+    if (audioBlob) {
+      const fileName = `${user.id}/${Date.now()}.webm`
+      const { error: uploadError } = await supabase.storage
+        .from('session-audio')
+        .upload(fileName, audioBlob, { contentType: 'audio/webm' })
+
+      if (!uploadError) {
+        const { data: urlData } = supabase.storage
+          .from('session-audio')
+          .getPublicUrl(fileName)
+        audioUrl = urlData.publicUrl
+      }
     }
-  }, [userId])
 
-  const incrementSession = (score = null) => {
+    // Save session record
+    const { data: sessionData } = await supabase
+      .from('sessions')
+      .insert({
+        user_id: user.id,
+        topic: topicTitle,
+        note: note || null,
+        audio_url: audioUrl,
+        transcript: transcript || null,
+        ai_score: aiResult?.score || null,
+        ai_clarity: aiResult?.clarity || null,
+        ai_confidence: aiResult?.confidence || null,
+        ai_filler_count: aiResult?.filler_count || null,
+        ai_feedback: aiResult?.feedback || null,
+        ai_strengths: aiResult?.strengths || null,
+        ai_improvements: aiResult?.improvements || null,
+        ai_structure: aiResult?.structure || null,
+        ai_vocabulary: aiResult?.vocabulary || null,
+        ai_pacing: aiResult?.pacing || null,
+      })
+      .select()
+      .single()
+
+    // Update stats
     const newSessions = sessions + 1
-    setSessions(newSessions)
-    localStorage.setItem('ds_sessions', newSessions)
     const newStreak = streak + 1
+    const newAvg = aiResult?.score
+      ? avgScore === 0 ? aiResult.score : ((avgScore * sessions + aiResult.score) / newSessions)
+      : avgScore
+    const roundedAvg = Math.round(newAvg * 10) / 10
+
+    setSessions(newSessions)
     setStreak(newStreak)
-    localStorage.setItem('ds_streak', newStreak)
-    if (score !== null) {
-      const newAvg = avgScore === 0 ? score : ((avgScore * sessions + score) / newSessions)
-      const rounded = Math.round(newAvg * 10) / 10
-      setAvgScore(rounded)
-      localStorage.setItem('ds_avg_score', rounded)
-    }
+    setAvgScore(roundedAvg)
+
+    await supabase.from('user_stats').update({
+      sessions: newSessions,
+      streak: newStreak,
+      avg_score: roundedAvg,
+      last_session: new Date().toISOString(),
+    }).eq('user_id', user.id)
+
+    await loadUserData(user.id)
+    return sessionData?.id
+  }
+
+  // Offline fallback (no auth)
+  const incrementSession = () => {
+    setSessions(s => s + 1)
+    setStreak(s => s + 1)
   }
 
   return (
-    <AppContext.Provider
-      value={{
-        streak,
-        sessions,
-        avgScore,
-        currentTopic,
-        setCurrentTopic,
-        currentTab,
-        setCurrentTab,
-        mode,
-        toggleMode,
-        userId,
-        cloudConnected,
-        latestReview,
-        setLatestReview,
-        recentSessions,
-        setRecentSessions,
-        refreshCloudProgress,
-        incrementSession,
-      }}
-    >
+    <AppContext.Provider value={{
+      user, authLoading,
+      streak, sessions, avgScore, sessionHistory,
+      currentTopic, setCurrentTopic,
+      currentTab, setCurrentTab,
+      mode, toggleMode,
+      signInWithGoogle, signInWithEmail, signUpWithEmail, signOut,
+      saveSession, incrementSession,
+    }}>
       {children}
     </AppContext.Provider>
   )
 }
 
-export { AppContext }
+export const useApp = () => useContext(AppContext)

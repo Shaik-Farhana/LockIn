@@ -1,5 +1,5 @@
 import { NavLink, useNavigate } from 'react-router-dom'
-import { useApp } from '../context/useApp'
+import { useApp } from '../context/AppContext'
 
 export default function TopNav() {
   const { streak, mode, toggleMode } = useApp()

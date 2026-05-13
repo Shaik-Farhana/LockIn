@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useApp } from '../context/useApp'
+import { useApp } from '../context/AppContext'
 
 const STUDY_DURATION = 5 * 60
 

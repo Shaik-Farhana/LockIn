@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { useApp } from '../context/useApp'
+import { useApp } from '../context/AppContext'
 
 export default function StarryBg() {
   const canvasRef = useRef(null)

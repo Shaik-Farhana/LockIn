@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { useApp } from '../context/useApp'
+import { useApp } from '../context/AppContext'
 import FlowerPot from '../components/FlowerPot'
 
 export default function Home() {
