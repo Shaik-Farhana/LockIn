@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useApp } from '../context/AppContext'
 import { analyzeTranscript } from '../lib/groq'
@@ -11,16 +11,40 @@ export default function SessionComplete() {
   const [saved, setSaved] = useState(false)
   const [aiResult, setAiResult] = useState(null)
   const [analyzing, setAnalyzing] = useState(false)
+  const [aiError, setAiError] = useState(false)
+  const audioRef = useRef(null)
+  const audioUrlRef = useRef(null)
 
   const transcript = sessionStorage.getItem('lockin_transcript') || ''
   const audioBlob = window.__lockin_audio_blob || null
 
-  // Auto-run AI analysis when page loads
+  // Build audio URL for playback
   useEffect(() => {
-    if (transcript && transcript.length > 50) {
+    if (audioBlob && audioBlob.size > 0) {
+      const url = URL.createObjectURL(audioBlob)
+      audioUrlRef.current = url
+      if (audioRef.current) audioRef.current.src = url
+      return () => URL.revokeObjectURL(url)
+    }
+  }, [audioBlob])
+
+  // Auto-run AI analysis — lower threshold to 10 chars for better coverage
+  useEffect(() => {
+    const topicTitle = currentTopic?.title || 'Communication practice'
+    const textToAnalyze = transcript.trim()
+
+    if (textToAnalyze.length > 10) {
       setAnalyzing(true)
-      analyzeTranscript(transcript, currentTopic?.title || 'Communication practice')
-        .then(result => { setAiResult(result) })
+      setAiError(false)
+      analyzeTranscript(textToAnalyze, topicTitle)
+        .then(result => {
+          if (result) {
+            setAiResult(result)
+          } else {
+            setAiError(true)
+          }
+        })
+        .catch(() => setAiError(true))
         .finally(() => setAnalyzing(false))
     }
   }, [])
@@ -34,7 +58,7 @@ export default function SessionComplete() {
           note,
           topicTitle: currentTopic?.title,
           transcript,
-          aiResult, // already contains structure, vocabulary, pacing now
+          aiResult,
         })
       } else {
         incrementSession()
@@ -42,6 +66,7 @@ export default function SessionComplete() {
       // Cleanup
       sessionStorage.removeItem('lockin_transcript')
       sessionStorage.removeItem('lockin_audio_url')
+      sessionStorage.removeItem('lockin_has_audio')
       delete window.__lockin_audio_blob
       setSaved(true)
       setTimeout(() => navigate('/'), 1200)
@@ -61,6 +86,7 @@ export default function SessionComplete() {
 
   return (
     <div className="relative z-10 flex flex-col items-center px-4 pt-28 pb-12 max-w-xl mx-auto w-full min-h-screen">
+
       {/* Header */}
       <div className="text-center mb-8">
         <div className="font-editorial italic text-5xl text-gold mb-2" style={{ textShadow: '0 0 40px rgba(255,197,45,0.4)' }}>✦</div>
@@ -88,14 +114,56 @@ export default function SessionComplete() {
         </div>
       )}
 
+      {/* Audio Playback */}
+      {audioBlob && audioBlob.size > 0 ? (
+        <div className="glass rounded-2xl p-5 mb-5 w-full">
+          <div className="font-mono text-xs text-night-light tracking-widest mb-3 uppercase">Your Recording —</div>
+          <audio
+            ref={audioRef}
+            controls
+            className="w-full"
+            style={{
+              borderRadius: '10px',
+              filter: 'invert(1) hue-rotate(180deg)',
+              height: '40px',
+            }}
+          />
+          <div className="font-mono text-xs text-night-light mt-2 text-center">
+            {(audioBlob.size / 1024).toFixed(1)} KB recorded
+          </div>
+        </div>
+      ) : (
+        <div className="glass rounded-2xl p-4 mb-5 w-full text-center">
+          <div className="font-mono text-xs text-night-light/50 tracking-widest">
+            No audio — mic was not available or permission denied
+          </div>
+        </div>
+      )}
+
       {/* AI Analysis */}
       {analyzing && (
         <div className="glass rounded-2xl p-5 mb-5 w-full text-center">
-          <div className="font-mono text-xs text-gold tracking-widest mb-2">ANALYZING YOUR SPEECH —</div>
-          <div className="flex justify-center gap-1">
+          <div className="font-mono text-xs text-gold tracking-widest mb-3">ANALYZING YOUR SPEECH —</div>
+          <div className="flex justify-center gap-1.5">
             {[0, 1, 2].map(i => (
               <div key={i} className="w-2 h-2 rounded-full bg-gold animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
             ))}
+          </div>
+        </div>
+      )}
+
+      {aiError && !analyzing && (
+        <div className="glass rounded-2xl p-4 mb-5 w-full text-center">
+          <div className="font-mono text-xs text-red-400 tracking-widest">
+            AI analysis failed — check your GROQ API key or try again
+          </div>
+        </div>
+      )}
+
+      {!transcript && !analyzing && (
+        <div className="glass rounded-2xl p-4 mb-5 w-full text-center">
+          <div className="font-mono text-xs text-night-light/60 tracking-widest">
+            No transcript captured — speech recognition may not be supported in this browser
           </div>
         </div>
       )}
@@ -104,15 +172,29 @@ export default function SessionComplete() {
         <div className="glass rounded-2xl p-5 mb-5 w-full">
           <div className="font-mono text-xs text-gold tracking-widest mb-4 uppercase">AI Feedback —</div>
 
-          {/* Scores */}
+          {/* Score cards */}
           <div className="grid grid-cols-3 gap-3 mb-4">
             {[
               { label: 'Overall', val: aiResult.score },
               { label: 'Clarity', val: aiResult.clarity },
               { label: 'Confidence', val: aiResult.confidence },
             ].map(s => (
-              <div key={s.label} className="text-center">
+              <div key={s.label} className="text-center glass rounded-xl p-3">
                 <div className={`font-display text-3xl ${scoreColor(s.val)}`}>{s.val || '—'}</div>
+                <div className="font-mono text-xs text-night-light">{s.label}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Extra scores */}
+          <div className="grid grid-cols-3 gap-3 mb-4">
+            {[
+              { label: 'Structure', val: aiResult.structure },
+              { label: 'Vocabulary', val: aiResult.vocabulary },
+              { label: 'Pacing', val: aiResult.pacing },
+            ].map(s => (
+              <div key={s.label} className="text-center glass rounded-xl p-3">
+                <div className={`font-display text-2xl ${scoreColor(s.val)}`}>{s.val || '—'}</div>
                 <div className="font-mono text-xs text-night-light">{s.label}</div>
               </div>
             ))}
