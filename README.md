@@ -28,6 +28,16 @@ npm run dev
 npm run build
 ```
 
+## Supabase Setup
+
+1. Create a Supabase project.
+2. Run `supabase/schema.sql` in the SQL editor.
+3. Make sure the `session-audio` storage bucket exists.
+4. Add these env vars locally and in Vercel:
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+   - `VITE_GROQ_API_KEY`
+
 ## Tech Stack
 
 React, Vite, Tailwind CSS, and Vercel.

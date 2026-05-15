@@ -1,19 +1,109 @@
 create extension if not exists "pgcrypto";
 
-create table if not exists public.practice_sessions (
+create table if not exists public.user_stats (
+  user_id text primary key,
+  streak integer not null default 0,
+  sessions integer not null default 0,
+  avg_score numeric(4,1) not null default 0,
+  last_session timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.sessions (
   id uuid primary key default gen_random_uuid(),
   user_id text not null,
-  topic_title text not null,
-  topic_source text not null default 'unknown',
-  topic_difficulty text not null default 'unknown',
-  duration_seconds integer not null default 0,
-  audio_path text not null,
-  transcript text not null default '',
-  ai_feedback jsonb not null default '{}'::jsonb,
-  overall_score numeric(4,1) not null default 0,
-  completed_at timestamptz not null default now(),
+  topic text not null,
+  note text,
+  audio_url text,
+  transcript text,
+  ai_score numeric(4,1),
+  ai_clarity numeric(4,1),
+  ai_confidence numeric(4,1),
+  ai_filler_count integer,
+  ai_feedback text,
+  ai_strengths jsonb,
+  ai_improvements jsonb,
+  ai_structure numeric(4,1),
+  ai_vocabulary numeric(4,1),
+  ai_pacing numeric(4,1),
   created_at timestamptz not null default now()
 );
 
-create index if not exists idx_practice_sessions_user_completed
-  on public.practice_sessions (user_id, completed_at desc);
+create index if not exists idx_sessions_user_created
+  on public.sessions (user_id, created_at desc);
+
+alter table public.user_stats enable row level security;
+alter table public.sessions enable row level security;
+
+drop policy if exists "user_stats_select_own" on public.user_stats;
+drop policy if exists "user_stats_insert_own" on public.user_stats;
+drop policy if exists "user_stats_update_own" on public.user_stats;
+create policy "user_stats_select_own"
+on public.user_stats
+for select
+using (auth.uid()::text = user_id);
+
+create policy "user_stats_insert_own"
+on public.user_stats
+for insert
+with check (auth.uid()::text = user_id);
+
+create policy "user_stats_update_own"
+on public.user_stats
+for update
+using (auth.uid()::text = user_id)
+with check (auth.uid()::text = user_id);
+
+drop policy if exists "sessions_select_own" on public.sessions;
+drop policy if exists "sessions_insert_own" on public.sessions;
+drop policy if exists "sessions_update_own" on public.sessions;
+drop policy if exists "sessions_delete_own" on public.sessions;
+create policy "sessions_select_own"
+on public.sessions
+for select
+using (auth.uid()::text = user_id);
+
+create policy "sessions_insert_own"
+on public.sessions
+for insert
+with check (auth.uid()::text = user_id);
+
+create policy "sessions_update_own"
+on public.sessions
+for update
+using (auth.uid()::text = user_id)
+with check (auth.uid()::text = user_id);
+
+create policy "sessions_delete_own"
+on public.sessions
+for delete
+using (auth.uid()::text = user_id);
+
+insert into storage.buckets (id, name, public)
+values ('session-audio', 'session-audio', true)
+on conflict (id) do nothing;
+
+create policy "session_audio_select_own"
+on storage.objects
+for select
+using (bucket_id = 'session-audio' and auth.uid()::text = split_part(name, '/', 1));
+
+drop policy if exists "session_audio_insert_own" on storage.objects;
+create policy "session_audio_insert_own"
+on storage.objects
+for insert
+with check (bucket_id = 'session-audio' and auth.uid()::text = split_part(name, '/', 1));
+
+drop policy if exists "session_audio_update_own" on storage.objects;
+create policy "session_audio_update_own"
+on storage.objects
+for update
+using (bucket_id = 'session-audio' and auth.uid()::text = split_part(name, '/', 1))
+with check (bucket_id = 'session-audio' and auth.uid()::text = split_part(name, '/', 1));
+
+drop policy if exists "session_audio_delete_own" on storage.objects;
+create policy "session_audio_delete_own"
+on storage.objects
+for delete
+using (bucket_id = 'session-audio' and auth.uid()::text = split_part(name, '/', 1));
