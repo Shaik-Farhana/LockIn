@@ -33,77 +33,30 @@ create table if not exists public.sessions (
 create index if not exists idx_sessions_user_created
   on public.sessions (user_id, created_at desc);
 
-alter table public.user_stats enable row level security;
-alter table public.sessions enable row level security;
-
 drop policy if exists "user_stats_select_own" on public.user_stats;
 drop policy if exists "user_stats_insert_own" on public.user_stats;
 drop policy if exists "user_stats_update_own" on public.user_stats;
-create policy "user_stats_select_own"
-on public.user_stats
-for select
-using (auth.uid()::text = user_id);
-
-create policy "user_stats_insert_own"
-on public.user_stats
-for insert
-with check (auth.uid()::text = user_id);
-
-create policy "user_stats_update_own"
-on public.user_stats
-for update
-using (auth.uid()::text = user_id)
-with check (auth.uid()::text = user_id);
-
 drop policy if exists "sessions_select_own" on public.sessions;
 drop policy if exists "sessions_insert_own" on public.sessions;
 drop policy if exists "sessions_update_own" on public.sessions;
 drop policy if exists "sessions_delete_own" on public.sessions;
-create policy "sessions_select_own"
-on public.sessions
-for select
-using (auth.uid()::text = user_id);
-
-create policy "sessions_insert_own"
-on public.sessions
-for insert
-with check (auth.uid()::text = user_id);
-
-create policy "sessions_update_own"
-on public.sessions
-for update
-using (auth.uid()::text = user_id)
-with check (auth.uid()::text = user_id);
-
-create policy "sessions_delete_own"
-on public.sessions
-for delete
-using (auth.uid()::text = user_id);
+drop policy if exists "session_audio_select_own" on storage.objects;
+drop policy if exists "session_audio_insert_own" on storage.objects;
+drop policy if exists "session_audio_update_own" on storage.objects;
+drop policy if exists "session_audio_delete_own" on storage.objects;
 
 insert into storage.buckets (id, name, public)
 values ('session-audio', 'session-audio', true)
 on conflict (id) do nothing;
 
-create policy "session_audio_select_own"
+drop policy if exists "session_audio_select_public" on storage.objects;
+drop policy if exists "session_audio_insert_public" on storage.objects;
+create policy "session_audio_select_public"
 on storage.objects
 for select
-using (bucket_id = 'session-audio' and auth.uid()::text = split_part(name, '/', 1));
+using (bucket_id = 'session-audio');
 
-drop policy if exists "session_audio_insert_own" on storage.objects;
-create policy "session_audio_insert_own"
+create policy "session_audio_insert_public"
 on storage.objects
 for insert
-with check (bucket_id = 'session-audio' and auth.uid()::text = split_part(name, '/', 1));
-
-drop policy if exists "session_audio_update_own" on storage.objects;
-create policy "session_audio_update_own"
-on storage.objects
-for update
-using (bucket_id = 'session-audio' and auth.uid()::text = split_part(name, '/', 1))
-with check (bucket_id = 'session-audio' and auth.uid()::text = split_part(name, '/', 1));
-
-drop policy if exists "session_audio_delete_own" on storage.objects;
-create policy "session_audio_delete_own"
-on storage.objects
-for delete
-using (bucket_id = 'session-audio' and auth.uid()::text = split_part(name, '/', 1));
+with check (bucket_id = 'session-audio');
