@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useApp } from '../context/AppContext'
 import FlowerPot from '../components/FlowerPot'
+import CDPlayer from '../components/CDPlayer'
 
 const MILESTONES = [
   { day: 1, icon: '🌱' },
@@ -183,6 +184,19 @@ function LatestFeedback({ session }) {
         <span className="font-editorial italic text-sm text-ink">"{session.topic}"</span>
       </div>
 
+      {session.audio_url && (
+        <div className="mb-4">
+          <CDPlayer audioURL={session.audio_url} sessionName={session.topic} />
+        </div>
+      )}
+
+      {session.transcript && (
+        <div className="glass rounded-xl p-3 mb-4">
+          <div className="font-mono text-xs text-night-light tracking-widest mb-2 uppercase">Transcript</div>
+          <p className="font-sans text-sm text-paper/75 leading-relaxed">{session.transcript}</p>
+        </div>
+      )}
+
       {/* 4 score cards */}
       <div className="grid grid-cols-4 gap-2 mb-5">
         {[
@@ -272,10 +286,13 @@ export default function Progress() {
 
   // Default to showing latest session feedback
   const latestWithAI = sessionHistory?.find(s => s.ai_score)
+  const latestSession = sessionHistory?.[0]
 
   useEffect(() => {
-    if (latestWithAI && !selectedSession) setSelectedSession(latestWithAI)
-  }, [latestWithAI])
+    if (!selectedSession && (latestWithAI || latestSession)) {
+      setSelectedSession(latestWithAI || latestSession)
+    }
+  }, [latestWithAI, latestSession, selectedSession])
 
   return (
     <div className="relative z-10 min-h-screen pt-28 pb-12 px-4 md:px-8">
@@ -409,6 +426,11 @@ export default function Progress() {
                       {s.ai_improvements?.[0] && (
                         <div className="font-sans text-xs mt-1" style={{ color: '#FFC52D' }}>
                           → {s.ai_improvements[0]}
+                        </div>
+                      )}
+                      {s.transcript && (
+                        <div className="font-sans text-xs text-paper/55 mt-1 line-clamp-2">
+                          {s.transcript}
                         </div>
                       )}
                     </div>

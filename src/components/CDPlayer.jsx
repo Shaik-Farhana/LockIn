@@ -73,7 +73,7 @@ export default function CDPlayer({ audioURL, sessionName }) {
         <div className="font-editorial italic text-gold-soft text-sm mb-1 truncate">
           {sessionName || 'Session Recording'}
         </div>
-        <div className="font-mono text-xs text-night-light mb-3">Dev_Speaks · Personal</div>
+        <div className="font-mono text-xs text-night-light mb-3">LockIn · Personal</div>
 
         <button onClick={toggle} className="btn-glass text-sm py-2 px-5">
           {playing ? '⏸ Pause' : '▶ Play'}

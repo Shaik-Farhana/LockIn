@@ -12,11 +12,16 @@ export default function SessionComplete() {
   const [aiResult, setAiResult] = useState(null)
   const [analyzing, setAnalyzing] = useState(false)
   const [aiError, setAiError] = useState(false)
+  const [displayTranscript, setDisplayTranscript] = useState('')
   const audioRef = useRef(null)
   const audioUrlRef = useRef(null)
 
   const transcript = sessionStorage.getItem('lockin_transcript') || ''
   const audioBlob = window.__lockin_audio_blob || null
+
+  useEffect(() => {
+    setDisplayTranscript(transcript)
+  }, [transcript])
 
   // Build audio URL for playback
   useEffect(() => {
@@ -53,13 +58,20 @@ export default function SessionComplete() {
     setSaving(true)
     try {
       if (user) {
-        await saveSession({
+        const savedSession = await saveSession({
           audioBlob,
           note,
+          topic: currentTopic,
           topicTitle: currentTopic?.title,
           transcript,
           aiResult,
+          durationSeconds: 300,
         })
+        if (savedSession?.analysis) {
+          setAiResult(savedSession.analysis)
+          setAiError(false)
+        }
+        if (savedSession?.transcript) setDisplayTranscript(savedSession.transcript)
       } else {
         incrementSession()
       }
@@ -239,10 +251,10 @@ export default function SessionComplete() {
       )}
 
       {/* Transcript preview */}
-      {transcript && (
+      {displayTranscript && (
         <div className="glass rounded-xl p-4 mb-5 w-full">
           <div className="font-mono text-xs text-night-light mb-2 tracking-widest">YOUR TRANSCRIPT —</div>
-          <p className="font-sans text-xs text-paper/60 leading-relaxed line-clamp-4">{transcript}</p>
+          <p className="font-sans text-xs text-paper/60 leading-relaxed line-clamp-4">{displayTranscript}</p>
         </div>
       )}
 

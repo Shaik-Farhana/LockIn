@@ -26,6 +26,8 @@ export default function SpeakMode() {
   const chunksRef = useRef([])
   const audioBlobRef = useRef(null)
   const recognitionRef = useRef(null)
+  const transcriptRef = useRef('')
+  const stopResolveRef = useRef(null)
 
   useEffect(() => {
     if (!currentTopic) navigate('/topics')
@@ -38,7 +40,7 @@ export default function SpeakMode() {
         setBars(Array(18).fill(0).map(() => Math.floor(Math.random() * 28) + 4))
       }, 120)
     } else if (timeLeft === 0) {
-      stopRecording()
+      void stopRecording()
     }
     return () => { clearInterval(intervalRef.current); clearInterval(waveRef.current) }
   }, [recording, timeLeft])
@@ -53,6 +55,10 @@ export default function SpeakMode() {
       mr.onstop = () => {
         const blob = new Blob(chunksRef.current, { type: 'audio/webm' })
         audioBlobRef.current = blob
+        if (stopResolveRef.current) {
+          stopResolveRef.current()
+          stopResolveRef.current = null
+        }
       }
       mr.start()
       mediaRef.current = mr
@@ -65,11 +71,14 @@ export default function SpeakMode() {
         recognition.interimResults = true
         recognition.lang = 'en-US'
         recognition.onresult = (event) => {
-          let final = ''
+          let text = ''
           for (let i = 0; i < event.results.length; i++) {
-            if (event.results[i].isFinal) final += event.results[i][0].transcript + ' '
+            const result = event.results[i]
+            const part = result[0]?.transcript || ''
+            if (part) text += `${part} `
           }
-          setTranscript(final)
+          transcriptRef.current = text.trim()
+          setTranscript(transcriptRef.current)
         }
         recognition.start()
         recognitionRef.current = recognition
@@ -86,19 +95,38 @@ export default function SpeakMode() {
     clearInterval(intervalRef.current)
     clearInterval(waveRef.current)
     setBars(Array(18).fill(3))
-    try { mediaRef.current?.stop() } catch { }
-    try { recognitionRef.current?.stop() } catch { }
+
+    return new Promise((resolve) => {
+      stopResolveRef.current = resolve
+
+      const recorder = mediaRef.current
+      if (recorder && recorder.state === 'recording') {
+        try {
+          recorder.stop()
+        } catch {
+          if (stopResolveRef.current) {
+            stopResolveRef.current()
+            stopResolveRef.current = null
+          }
+        }
+      } else if (stopResolveRef.current) {
+        stopResolveRef.current()
+        stopResolveRef.current = null
+      }
+
+      try { recognitionRef.current?.stop() } catch { }
+    })
   }
 
-  const handleFinish = () => {
-    stopRecording()
+  const handleFinish = async () => {
+    await stopRecording()
     // Pass blob and transcript to session complete via sessionStorage
     if (audioBlobRef.current) {
       const url = URL.createObjectURL(audioBlobRef.current)
       sessionStorage.setItem('lockin_audio_url', url)
       sessionStorage.setItem('lockin_has_audio', 'true')
     }
-    sessionStorage.setItem('lockin_transcript', transcript)
+    sessionStorage.setItem('lockin_transcript', transcriptRef.current || transcript)
     // Store blob reference in window for SessionComplete to access
     window.__lockin_audio_blob = audioBlobRef.current
     navigate('/session-complete')

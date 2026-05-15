@@ -91,55 +91,105 @@ export function AppProvider({ children }) {
     await supabase.auth.signOut()
   }
 
+  const uploadSessionAudio = async (audioBlob) => {
+    if (!audioBlob || !user) return { audioPath: null, audioUrl: null }
+
+    const audioPath = `${user.id}/${Date.now()}.webm`
+    const { error: uploadError } = await supabase.storage
+      .from('session-audio')
+      .upload(audioPath, audioBlob, { contentType: audioBlob.type || 'audio/webm', upsert: false })
+
+    if (uploadError) {
+      console.warn('Audio upload failed:', uploadError)
+      return { audioPath: null, audioUrl: null }
+    }
+
+    const { data: urlData } = supabase.storage
+      .from('session-audio')
+      .getPublicUrl(audioPath)
+
+    return {
+      audioPath,
+      audioUrl: urlData?.publicUrl || null,
+    }
+  }
+
   // Called from SessionComplete with full session data
-  const saveSession = async ({ audioBlob, note, topicTitle, aiResult, transcript }) => {
+  const saveSession = async ({ audioBlob, note, topic, topicTitle, aiResult, transcript, durationSeconds = 300 }) => {
     if (!user) return null
 
+    const resolvedTopicTitle = topic?.title || topicTitle || 'Communication practice'
     let audioUrl = null
+    let audioPath = null
+    let resolvedTranscript = transcript || ''
+    let resolvedAnalysis = aiResult || null
 
-    // Upload audio to Supabase Storage
     if (audioBlob) {
-      const fileName = `${user.id}/${Date.now()}.webm`
-      const { error: uploadError } = await supabase.storage
-        .from('session-audio')
-        .upload(fileName, audioBlob, { contentType: 'audio/webm' })
+      const uploaded = await uploadSessionAudio(audioBlob)
+      audioPath = uploaded.audioPath
+      audioUrl = uploaded.audioUrl
 
-      if (!uploadError) {
-        const { data: urlData } = supabase.storage
-          .from('session-audio')
-          .getPublicUrl(fileName)
-        audioUrl = urlData.publicUrl
+      if (audioPath) {
+        try {
+        const response = await fetch('/api/analyze-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: user.id,
+            topic: {
+              title: resolvedTopicTitle,
+              difficulty: topic?.difficulty || 'unknown',
+            },
+            audioPath,
+            durationSeconds,
+            mimeType: audioBlob.type || 'audio/webm',
+          }),
+        })
+
+        if (response.ok) {
+          const payload = await response.json()
+          if (payload?.transcript) resolvedTranscript = payload.transcript
+          if (payload?.analysis) resolvedAnalysis = payload.analysis
+          if (payload?.audioUrl) audioUrl = payload.audioUrl
+        }
+        } catch (err) {
+          console.warn('Server analysis unavailable, using local session data:', err)
+        }
       }
     }
 
     // Save session record
-    const { data: sessionData } = await supabase
+    const { data: sessionData, error: sessionError } = await supabase
       .from('sessions')
       .insert({
         user_id: user.id,
-        topic: topicTitle,
+        topic: resolvedTopicTitle,
         note: note || null,
         audio_url: audioUrl,
-        transcript: transcript || null,
-        ai_score: aiResult?.score || null,
-        ai_clarity: aiResult?.clarity || null,
-        ai_confidence: aiResult?.confidence || null,
-        ai_filler_count: aiResult?.filler_count || null,
-        ai_feedback: aiResult?.feedback || null,
-        ai_strengths: aiResult?.strengths || null,
-        ai_improvements: aiResult?.improvements || null,
-        ai_structure: aiResult?.structure || null,
-        ai_vocabulary: aiResult?.vocabulary || null,
-        ai_pacing: aiResult?.pacing || null,
+        transcript: resolvedTranscript || null,
+        ai_score: resolvedAnalysis?.score || null,
+        ai_clarity: resolvedAnalysis?.clarity || null,
+        ai_confidence: resolvedAnalysis?.confidence || null,
+        ai_filler_count: resolvedAnalysis?.filler_count || null,
+        ai_feedback: resolvedAnalysis?.feedback || null,
+        ai_strengths: resolvedAnalysis?.strengths || null,
+        ai_improvements: resolvedAnalysis?.improvements || null,
+        ai_structure: resolvedAnalysis?.structure || null,
+        ai_vocabulary: resolvedAnalysis?.vocabulary || null,
+        ai_pacing: resolvedAnalysis?.pacing || null,
       })
       .select()
       .single()
 
+    if (sessionError) {
+      throw sessionError
+    }
+
     // Update stats
     const newSessions = sessions + 1
     const newStreak = streak + 1
-    const newAvg = aiResult?.score
-      ? avgScore === 0 ? aiResult.score : ((avgScore * sessions + aiResult.score) / newSessions)
+    const newAvg = resolvedAnalysis?.score != null
+      ? avgScore === 0 ? resolvedAnalysis.score : ((avgScore * sessions + resolvedAnalysis.score) / newSessions)
       : avgScore
     const roundedAvg = Math.round(newAvg * 10) / 10
 
@@ -155,7 +205,13 @@ export function AppProvider({ children }) {
     }).eq('user_id', user.id)
 
     await loadUserData(user.id)
-    return sessionData?.id
+    return {
+      id: sessionData?.id || null,
+      transcript: resolvedTranscript,
+      analysis: resolvedAnalysis,
+      audioUrl,
+      audioPath,
+    }
   }
 
   // Offline fallback (no auth)

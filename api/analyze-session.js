@@ -12,37 +12,36 @@ function safeJsonParse(text) {
 function normalizeAnalysis(raw) {
   if (!raw || typeof raw !== 'object') {
     return {
-      summary: 'Your response has been recorded. Keep practicing concise structure and confident delivery.',
+      score: 0,
+      clarity: 0,
+      confidence: 0,
+      structure: 0,
+      vocabulary: 0,
+      pacing: 0,
+      filler_count: 0,
+      feedback: 'Your response has been recorded. Keep practicing concise structure and confident delivery.',
       strengths: [],
       improvements: [],
-      drills: [],
-      scores: { clarity: 0, structure: 0, delivery: 0, language: 0, overall: 0 },
     }
   }
 
-  const scores = raw.scores || {}
   const numeric = (value) => {
     const num = Number(value)
     if (Number.isNaN(num)) return 0
     return Math.max(0, Math.min(10, Math.round(num * 10) / 10))
   }
 
-  const overall = numeric(
-    scores.overall || ((numeric(scores.clarity) + numeric(scores.structure) + numeric(scores.delivery) + numeric(scores.language)) / 4)
-  )
-
   return {
-    summary: typeof raw.summary === 'string' ? raw.summary : '',
+    score: numeric(raw.score),
+    clarity: numeric(raw.clarity),
+    confidence: numeric(raw.confidence),
+    structure: numeric(raw.structure),
+    vocabulary: numeric(raw.vocabulary),
+    pacing: numeric(raw.pacing),
+    filler_count: Math.max(0, Math.round(Number(raw.filler_count) || 0)),
+    feedback: typeof raw.feedback === 'string' ? raw.feedback : '',
     strengths: Array.isArray(raw.strengths) ? raw.strengths.slice(0, 4) : [],
     improvements: Array.isArray(raw.improvements) ? raw.improvements.slice(0, 4) : [],
-    drills: Array.isArray(raw.drills) ? raw.drills.slice(0, 4) : [],
-    scores: {
-      clarity: numeric(scores.clarity),
-      structure: numeric(scores.structure),
-      delivery: numeric(scores.delivery),
-      language: numeric(scores.language),
-      overall,
-    },
   }
 }
 
@@ -90,7 +89,7 @@ export default async function handler(req, res) {
           content: [
             {
               type: 'input_text',
-              text: 'You are a speaking coach. Return strict JSON only with keys: summary (string), strengths (string[]), improvements (string[]), drills (string[]), scores ({clarity:number, structure:number, delivery:number, language:number, overall:number}). Score range: 0-10.',
+              text: 'You are a speaking coach. Return strict JSON only with keys: score, clarity, confidence, structure, vocabulary, pacing, filler_count, feedback, strengths, improvements. All scores use a 0-10 scale.',
             },
           ],
         },
@@ -108,36 +107,11 @@ export default async function handler(req, res) {
 
     const parsedAnalysis = normalizeAnalysis(safeJsonParse(feedbackResponse.output_text))
 
-    const insertPayload = {
-      user_id: userId,
-      topic_title: topic.title,
-      topic_source: topic.source || 'unknown',
-      topic_difficulty: topic.difficulty || 'unknown',
-      duration_seconds: Number(durationSeconds) || 0,
-      audio_path: audioPath,
-      transcript,
-      ai_feedback: parsedAnalysis,
-      overall_score: parsedAnalysis.scores.overall,
-      completed_at: new Date().toISOString(),
-    }
-
-    const { data: insertedRows, error: insertError } = await supabase
-      .from('practice_sessions')
-      .insert(insertPayload)
-      .select('id, topic_title, overall_score, completed_at')
-      .limit(1)
-
-    if (insertError) {
-      res.status(500).json({ error: insertError.message })
-      return
-    }
-
     const { data: signedData } = await supabase.storage
       .from(bucket)
       .createSignedUrl(audioPath, 60 * 60 * 24 * 7)
 
     res.status(200).json({
-      session: insertedRows?.[0] || null,
       transcript,
       analysis: parsedAnalysis,
       audioUrl: signedData?.signedUrl || null,

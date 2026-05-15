@@ -37,6 +37,7 @@ npm run build
    - `VITE_SUPABASE_URL`
    - `VITE_SUPABASE_ANON_KEY`
    - `VITE_GROQ_API_KEY`
+   - `OPENAI_API_KEY` for server-side transcription and analysis fallback
 
 ## Tech Stack
 

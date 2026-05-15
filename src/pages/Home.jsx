@@ -15,7 +15,7 @@ export default function Home() {
         {/* Hero greeting */}
         <div className="text-center mb-12 animate-fade-up">
           <div className="font-mono text-xs text-night-light tracking-widest mb-3 uppercase">
-            {greeting}, Dev —
+            {greeting}, LockIn —
           </div>
           <h1 className="font-display text-7xl md:text-9xl text-paper tracking-widest leading-none mb-2">
             READY TO

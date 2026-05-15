@@ -22,8 +22,8 @@ export default function TopNav() {
       {/* Logo */}
       <button onClick={() => navigate('/')} className="flex items-center gap-1.5 flex-shrink-0">
         <span className="font-editorial italic text-2xl font-light leading-none"
-          style={{ color: isGolden ? '#FFD97D' : '#FFC52D' }}>Dev</span>
-        <span className="font-display text-xl text-paper tracking-widest leading-none">_Speaks</span>
+          style={{ color: isGolden ? '#FFD97D' : '#FFC52D' }}>Lock</span>
+        <span className="font-display text-xl text-paper tracking-widest leading-none">In</span>
       </button>
 
       {/* Nav links */}
